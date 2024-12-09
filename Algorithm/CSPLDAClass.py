@@ -1,0 +1,75 @@
+import numpy as np
+import os
+import joblib
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from scipy import signal
+import warnings
+warnings.filterwarnings("ignore")
+
+
+rootdir = os.path.dirname(os.path.abspath(__file__))
+# 仅供测试所用
+class CSPLDAClass:
+    def fbcsp_transform(self, X_train, FBCSP):
+        x = np.zeros([X_train.shape[0], 0])
+        filteeg = np.zeros(np.shape(X_train))
+        bandVue = np.array([[1, 8], [8, 16], [16, 24], [24, 32], [32, 40], [40, 48]])
+        for i in range(6):
+            b, a = signal.butter(4, [2 * bandVue[i, 0] / 250, 2 * bandVue[i, 1] / 250], 'bandpass', analog=True)
+            for trail in range(X_train.shape[0]):
+                for ch in range(X_train.shape[1]):
+                    filteeg[trail, ch, :] = signal.filtfilt(b, a, X_train[trail, ch, :])
+            XFB_train = FBCSP[i].transform(filteeg)  # csp空间滤波器训练
+            x = np.concatenate((x, XFB_train), axis=1)
+        return x
+
+    def getmodel(self, personID):
+        # 加载训练模型
+        model_path = rootdir + '/model/S' + str(personID) + '/'
+
+        csp_12 = joblib.load(model_path + 'csp_12.pkl')
+        lda_12 = joblib.load(model_path + 'lda_12.pkl')
+
+        csp_13 = joblib.load(model_path + 'csp_13.pkl')
+        lda_13 = joblib.load(model_path + 'lda_13.pkl')
+
+        csp_23 = joblib.load(model_path + 'csp_23.pkl')
+        lda_23 = joblib.load(model_path + 'lda_23.pkl')
+        return [csp_12, lda_12, csp_13, lda_13, csp_23, lda_23]
+
+    def getCSP(self, personID):
+        mod_max_path = rootdir + '/database'
+        mod_max_list = os.listdir(mod_max_path)
+        # mod_max_list.sort(key=lambda x: int(x[6:7]))
+        modPath = os.path.join(mod_max_path, mod_max_list[personID-1])
+        mod = joblib.load(modPath)
+        return mod
+
+    def recognize(self, data, personID):
+        #data = self.band_Filter(data, personID)  # 每个人选择不同的带通滤波器
+        mod = self.getmodel(personID)
+        csp_12 = mod[0]
+        lda_12 = mod[1]
+        csp_13 = mod[2]
+        lda_13 = mod[3]
+        csp_23 = mod[4]
+        lda_23 = mod[5]
+
+        data_csp_12 = self.fbcsp_transform(np.expand_dims(data, 0), csp_12)
+        data_csp_13 = self.fbcsp_transform(np.expand_dims(data, 0), csp_13)
+        data_csp_23 = self.fbcsp_transform(np.expand_dims(data, 0), csp_23)
+        # data_csp_12 = csp_12.transform(np.expand_dims(data, 0))
+        # data_csp_13 = csp_13.transform(np.expand_dims(data, 0))
+        # data_csp_23 = csp_23.transform(np.expand_dims(data, 0))
+        pro12 = lda_12.predict_proba(data_csp_12)
+        pro13 = lda_13.predict_proba(data_csp_13)
+        pro23 = lda_23.predict_proba(data_csp_23)
+        pro1 = pro12[0, 0] + pro13[0, 0]
+        pro2 = pro12[0, 1] + pro23[0, 0]
+        pro3 = pro13[0, 1] + pro23[0, 1]
+        pro = [pro1, pro2, pro3] #
+        result = pro.index(max(pro)) + 201
+        return result
+
+
+
