@@ -392,7 +392,7 @@ class TaskManagerMI(TaskManagerInterface):
             block_itr.append(itr)
         score_model = ScoreModel()
         score_model.score = sum(block_itr) / len(block_itr)
-        print(np.average(accuracy_for_one_block_set))
+        print("accuracy:", np.average(accuracy_for_one_block_set))
         return score_model
 
     # 计算ITR

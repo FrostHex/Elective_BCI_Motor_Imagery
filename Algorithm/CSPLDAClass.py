@@ -11,15 +11,19 @@ rootdir = os.path.dirname(os.path.abspath(__file__))
 # 仅供测试所用
 class CSPLDAClass:
     def fbcsp_transform(self, X_train, FBCSP):
-        x = np.zeros([X_train.shape[0], 0])
-        filteeg = np.zeros(np.shape(X_train))
-        bandVue = np.array([[1, 8], [8, 16], [16, 24], [24, 32], [32, 40], [40, 48]])
-        for i in range(6):
+        x = np.zeros([X_train.shape[0], 0]) # 初始化空数组，用于存储变换后的数据
+        filteeg = np.zeros(np.shape(X_train)) # 初始化滤波后的EEG数据数组
+        bandVue = np.array([[1, 8], [8, 16], [16, 24], [24, 32], [32, 40], [40, 48]]) # 定义频带范围
+        for i in range(6): # 对每个频带进行处理
+            # 设计带通滤波器
             b, a = signal.butter(4, [2 * bandVue[i, 0] / 250, 2 * bandVue[i, 1] / 250], 'bandpass', analog=True)
+            # 对每个试次进行滤波
             for trail in range(X_train.shape[0]):
-                for ch in range(X_train.shape[1]):
+                for ch in range(X_train.shape[1]): # 对每个通道进行E滤波
                     filteeg[trail, ch, :] = signal.filtfilt(b, a, X_train[trail, ch, :])
-            XFB_train = FBCSP[i].transform(filteeg)  # csp空间滤波器训练
+            # 使用CSP变换滤波后的数据
+            XFB_train = FBCSP[i].transform(filteeg)
+            # 将变换后的数据拼接到结果数组中
             x = np.concatenate((x, XFB_train), axis=1)
         return x
 
