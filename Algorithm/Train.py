@@ -1,46 +1,59 @@
 import numpy as np
+import os
 import joblib
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from mne.decoding import CSP
 from scipy import signal
 
-# Load your training data
-# X_train: EEG data of shape (trials, channels, samples)
-# y_train: Labels of shape (trials,)
-X_train = 
-y_train =
+# Trigger 定义
+# 实验开始	实验结束	 Block开始	Block结束	Trial开始	Trial结束	左手想象	右手想象	双脚想象	测试集特有(想象开始)
+#  250        251     242         243         240         241         201     202     203     249
 
-# Define frequency bands
-bands = np.array([[1, 8], [8, 16], [16, 24], [24, 32], [32, 40], [40, 48]])
+class Train():
+    def __init__(self):
+        self.rootdir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../MI_data_training/'))
+        # Load your training data
+        # X_train: EEG data of shape (trials, channels, samples)
+        # y_train: Labels of shape (trials,)
+        return
 
-# Initialize lists to store CSP and LDA models
-csp_models = []
-lda_models = []
+    def run(self):
+        data = self.get_data(1,1)
+        data = self.test_overview(data,250)
+        trigger = self.get_data(1,1,65) # 第65通道为trigger
+        trigger = self.test_overview(trigger,250)
+        # print("trigger:", trigger)
+        # label = self.get_label(1,2)
+        # print("label:", label)
+        # print(len(label))
+        return
 
-# Sampling rate
-fs = 250
+    # @brief: 读取pkl文件内数据
+    # @param: id: 从1到5,代表S1到S5，5位受试者
+    # @param: block: 从1到25，代表第1到第25个block数据
+    # @param: channel: 从1到65，代表第1到第65个通道数据
+    # @return: 返回数据
+    def get_data(self, id, block, channel=None):
+        data = joblib.load(self.rootdir + '/S' + str(id) + '/block_' + str(block) + '.pkl')['data']
+        if channel is not None:
+            return data[channel - 1]
+        else:
+            return data
 
-# Loop over each frequency band
-for band in bands:
-    # Design bandpass filter
-    b, a = signal.butter(4, [2 * band[0] / fs, 2 * band[1] / fs], btype='bandpass')
+    def get_label(self, id, block):
+        temp = self.get_data(id, block, 65)
+        label = [x for x in temp if x in [201, 202, 203]]
+        return label
 
-    # Apply bandpass filter to each trial
-    X_filtered = np.array([signal.filtfilt(b, a, trial, axis=1) for trial in X_train])
+    def test_overview(self, data, downsampling=None):
+        print("original shape:",data.shape)
+        if data.ndim == 1: data = data[::downsampling]
+        if data.ndim == 2: data = data[:,::downsampling]
+        print(data)
+        if (downsampling is not None): print("down sampled shape:", data.shape)
+        return data
 
-    # Initialize and fit CSP
-    csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
-    X_csp = csp.fit_transform(X_filtered, y_train)
 
-    # Initialize and fit LDA
-    lda = LDA()
-    lda.fit(X_csp, y_train)
-
-    # Append trained models to the lists
-    csp_models.append(csp)
-    lda_models.append(lda)
-
-# Save the models
-for i, (csp, lda) in enumerate(zip(csp_models, lda_models)):
-    joblib.dump(csp, f'csp_{i}.pkl')
-    joblib.dump(lda, f'lda_{i}.pkl')
+if __name__ == '__main__':
+    train = Train()
+    train.run()
