@@ -1,18 +1,28 @@
 import joblib
 import pickle
 from numpy.ma.core import shape
+import os
 
 # 定义文件路径
-path = '../MI_data_training/S1/block_1.pkl'
+# path = '../MI_data_training/S2/block_1.pkl'
 # path = './model/S1/lda_12.pkl'
 # path = './model/S1/csp_12.pkl'
+path = './cov_matrix_task.pkl'
 
 # 加载内容
-content = joblib.load(path)
-# print("content:", content)
-# print("type:", type(content))
+content = joblib.load(os.path.join(os.path.dirname(__file__), path))
+print("content:", content)
+print("type:", type(content))
 # print(shape(content['ch_names']))
 
+# 遍历所有block的PersonID
+# for s in range(1, 6):  # S1 to S5
+#     folder = f'../../MI_data_training/S{s}'
+#     for b in range(1, 26):  # block_1.pkl to block_25.pkl
+#         file = os.path.join(folder, f'block_{b}.pkl')
+#         if os.path.exists(file):
+#             data = joblib.load(file)
+#             print(f"PersonID in {file}: {data['personID']}")
 
 # with open(path, 'rb') as f:
 #     loaded_data = pickle.load(f)
