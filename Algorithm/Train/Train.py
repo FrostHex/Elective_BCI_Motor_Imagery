@@ -55,10 +55,11 @@ class Train():
     def run(self):
         self.preprocess_data('r') # 从pkl文件读取预处理后的数据和三类样本的协方差矩阵
         for id in range(1, 6): # 几位受试者分别进行
-            for tasks in ['12', '13', '23']: # 12、13、23三个CSP的训练分别进行
-                feature_1 = feature_2 = []
-                x1 = tasks[0]
-                x2 = tasks[1]
+            for task in ['12', '13', '23']: # 12、13、23三个CSP的训练分别进行
+                feature_1 = []
+                feature_2 = []
+                x1 = task[0]
+                x2 = task[1]
                 for block in range(0, self.valid_group_num[id]): # 从0到self.valid_group_num[id]-1
                     # 1.载入两类样本的协方差矩阵: Σ_x1x1、Σ_x2x2
                     # print("id:", id, "block:", block)
@@ -68,7 +69,7 @@ class Train():
                     self.cov_matrix_all = self.cov_matrix_task['1'] + self.cov_matrix_task['2']
                     # 3.计算总体数据的白化矩阵: Σ_xx^(1/2)
                     self.whitening_matrix_all = self.compute_whitening_matrix(self.cov_matrix_all)
-                    # print("whitening matrix for id:", id, " task:", tasks, ":\n", self.whitening_matrix_all)
+                    # print("whitening matrix for id:", id, " task:", task, ":\n", self.whitening_matrix_all)
                     # 4.计算两类样本白化后的协方差矩阵: Σ_x1'x1'、Σ_x2'x2'
                     self.cov_matrix_task_whitened['1'] = self.whitening_matrix_all @ self.cov_matrix_task['1'] @ self.whitening_matrix_all.T
                     self.cov_matrix_task_whitened['2'] = self.whitening_matrix_all @ self.cov_matrix_task['2'] @ self.whitening_matrix_all.T
@@ -79,24 +80,29 @@ class Train():
                     self.W_prime = np.hstack((eigvecs[:, :K//2], eigvecs[:, -K//2:])).real # 提取前K/2列和后K/2列拼接
                     # 6.计算最优空间滤波矩阵W
                     self.W = self.whitening_matrix_all.T @ self.W_prime # LxL @ LxK = LxK
+                    with open(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + '/csp_' + task + '.pkl'), 'wb') as f:
+                        joblib.dump(self.W.T, f)
                     # 7.采用所有训练样本通过共空间滤波矩阵W, 计算投影Y'
                     Y1_prime =  self.W.T @ self.data[id][INTERPRET_TASK[x1]][block] # KxL @ LxN = KxN
                     Y2_prime =  self.W.T @ self.data[id][INTERPRET_TASK[x2]][block]
                     # 8.计算两类样本Y', 每行的自相关系数
                     feature_1.append(np.diag(np.cov(Y1_prime))) # 计算Y'的 KxK 相关矩阵, data已经去均值，协方差矩阵即为自相关矩阵
                     feature_2.append(np.diag(np.cov(Y2_prime))) # 对角线元素作为特征, np.diag(np.cov(Y2_prime))长度为K
+                    # print("feature 1:", len(feature_1), "feature 2:", len(feature_2))
                 # 9.训练分类器
-                self.train_lda(id, tasks, feature_1, feature_2)
+                self.train_lda(id, task, feature_1, feature_2)
         return
 
 
     def train_lda(self, id, task, feature_1, feature_2):
-        # print("id:", id, "task:", task)
-        print("id:", id, "task:", task, "feature_1:", feature_1, "feature_2:", feature_2)
-        # 训练LDA模型
-        lda = LDA()
-        # lda.fit(X, y)
-
+        lda = LDA() # 训练LDA模型
+        X = np.vstack((feature_1, feature_2))
+        y = np.hstack((np.zeros(len(feature_1)), np.ones(len(feature_2))))
+        lda.fit(X, y)
+        print("lda score:", lda.score(X, y))
+        # 保存训练模型
+        with open(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + '/lda_' + task + '.pkl'), 'wb') as f:
+            joblib.dump(lda, f)
 
     # @brief: 读取pkl文件内数据
     # @param: id: 从1到5,代表S1到S5, 5位受试者
