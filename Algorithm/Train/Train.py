@@ -23,39 +23,40 @@ class Train():
         # 协方差矩阵字典，key为受试者ID，value为一个字典，key为左手、右手、双脚三个数据，每个数据为一个64*64的矩阵
         self.cov_matrix_task = {id: {'left': np.zeros((64, 64)), 'right': np.zeros((64, 64)), 'feet': np.zeros((64, 64))} for id in range(1, 6)}
 
+        # 总体的样本协方差矩阵，key为受试者ID，value为一个字典,key为12(左右手)，13(左手双脚)，23(右手双脚)三个数据，每个数据为一个64*64的矩阵
+        self.cov_matrix_all ={id: {'12': np.zeros((64, 64)), '13': np.zeros((64, 64)), '23': np.zeros((64, 64))} for id in range(1, 6)}
+
+        # 总体数据的白化矩阵，key为受试者ID，value为一个字典,key为12(左右手)，13(左手双脚)，23(右手双脚)三个数据，每个数据为一个64*64的矩阵
+        self.whitening_matrix_all = {id: {'12': np.zeros((64, 64)), '13': np.zeros((64, 64)), '23': np.zeros((64, 64))} for id in range(1, 6)}
+
+        # 三类样本白化后协方差矩阵，key为受试者ID，value为一个字典,key12(左右手)，13(左手双脚)，23(右手双脚)三组数据，每组数据为两个64*64的矩阵
+        self.cov_matrix_task_whitened = {id: {'12':[np.zeros((64, 64)), np.zeros((64, 64))], '13':[np.zeros((64, 64)), np.zeros((64, 64))], '23':[np.zeros((64, 64)), np.zeros((64, 64))]} for id in range(1, 6)}
+
+
 
     # @brief: 主函数
     def run(self):
-        # data = self.get_data(1,1)
-        # data = self.test_overview(data,250)
-        # trigger = self.get_data(1,1,65) # 第65通道为trigger
-        # trigger = self.test_overview(trigger)
-        # print("trigger:", trigger)
 
-        # 读取数据并分类
-        self.data_sort()
-        # print(self.data[1]['left'].shape)
-        # print(self.data[1]['left'])
-        # print(self.data[1]['right'].shape)
-        # print(self.data[1]['right'])
-        # print(self.data[1]['feet'].shape)
-        # print(self.data[1]['feet'])
+        self.step_1_cov_matrix_task('r')
 
-        # 将数据转换为三类样本的协方差矩阵
-        self.data_to_cov_matrix()
-        # print(self.cov_matrix_task[1]['left'].shape)
-        # print(self.cov_matrix_task[1]['left'])
+        # 分别计算总体的样本协方差矩阵，12，13，23的协方差矩阵
+        for id in range(1, 6):
+            self.cov_matrix_all[id]['12'] = self.cov_matrix_task[id]['left'] + self.cov_matrix_task[id]['right']
+            self.cov_matrix_all[id]['13'] = self.cov_matrix_task[id]['left'] + self.cov_matrix_task[id]['feet']
+            self.cov_matrix_all[id]['23'] = self.cov_matrix_task[id]['right'] + self.cov_matrix_task[id]['feet']
+        # print("cov_matrix_all:", self.cov_matrix_all)
+        # print(self.cov_matrix_all[5]['12'].shape)
 
-        # 保存三类样本的协方差矩阵至pkl文件
-        with open(os.path.join(os.path.dirname(__file__), 'cov_matrix_task.pkl'), 'wb') as f:
-            joblib.dump(self.cov_matrix_task, f)
+        # 计算白化矩阵
+        self.step_3_whitening_matrix_all('r')
+        print("whitening_matrix_all:", self.whitening_matrix_all)
 
-        # 从pkl文件读取三类样本的协方差矩阵
-        # with open(os.path.join(os.path.dirname(__file__), 'cov_matrix_task.pkl'), 'rb') as f:
-        #     self.cov_matrix_task = joblib.load(f)
-        # print("cov_matrix_task:", self.cov_matrix_task)
+        # 计算三类样本白化后协方差矩阵
+        self.step_4_cov_matrix_task_whitened('w')
 
         return
+
+
 
 
     # @brief: 读取pkl文件内数据
@@ -101,12 +102,49 @@ class Train():
         for id in range(1, 6):
             for task in ['left', 'right', 'feet']:
                 if self.data[id][task].size > 0:
+                    # 保险起见，手动去中心化，不加这步直接调cov发现会算出负数的特征值
+                    self.data[id][task] -= np.mean(self.data[id][task], axis=1, keepdims=True)
                     self.cov_matrix_task[id][task] = np.cov(self.data[id][task])
                 else:
                     self.cov_matrix_task[id][task] = np.zeros((64, 64))
 
+    # @brief: 计算白化矩阵
+    def compute_whitening_matrix(self, cov_matrix):
+        # 在协方差矩阵上添加一个小的正则化项
+        cov_matrix += 1e-6 * np.eye(cov_matrix.shape[0])
+        eigvals, eigvecs = np.linalg.eigh(cov_matrix)  # 特征分解, (eigh适用于对称矩阵)
+        eigvals_inv_sqrt = np.diag(1.0 / np.sqrt(eigvals)) # 计算 Λ^(-1/2)
+        # 构建白化矩阵 Σ_xx^(-1/2)
+        whitening_matrix = (eigvals_inv_sqrt @ eigvecs).T # @为矩阵乘法
+        return whitening_matrix
+    
+    def step_1_cov_matrix_task(self,operation):
+        if operation == 'w':  # 保存三类样本的协方差矩阵至pkl文件
+            self.data_sort() # 读取数据并分类
+            self.data_to_cov_matrix() # 将数据转换为三类样本的协方差矩阵
+            # print("cov_matrix_task:", self.cov_matrix_task)
+            with open(os.path.join(os.path.dirname(__file__), 'cov_matrix_task.pkl'), 'wb') as f:
+                joblib.dump(self.cov_matrix_task, f)
+        elif operation == 'r': # 从pkl文件读取三类样本的协方差矩阵
+            with open(os.path.join(os.path.dirname(__file__), 'cov_matrix_task.pkl'), 'rb') as f:
+                self.cov_matrix_task = joblib.load(f)
+    
+    def step_3_whitening_matrix_all(self,operation):
+        if operation == 'w': # 保存白化矩阵至pkl文件
+            for id in range(1, 6): # 计算白化矩阵
+                for tasks in ['12', '13', '23']:
+                    self.whitening_matrix_all[id][tasks] = self.compute_whitening_matrix(self.cov_matrix_all[id][tasks])
+            with open(os.path.join(os.path.dirname(__file__), 'whitening_matrix_all.pkl'), 'wb') as f:
+                joblib.dump(self.whitening_matrix_all, f)
+        elif operation == 'r': # 从pkl文件读取白化矩阵
+            with open(os.path.join(os.path.dirname(__file__), 'whitening_matrix_all.pkl'), 'rb') as f:
+                self.whitening_matrix_all = joblib.load(f)
 
-
+    def step_4_cov_matrix_task_whitened(self,operation):
+        if operation == 'w':
+            for id in range(1, 6):
+                for tasks in ['12', '13', '23']:
+                    self.cov_matrix_task_whitened[id][tasks][0] = self.whitening_matrix_all[id][tasks] @ self.cov_matrix_task[id] # TODO
 
 
 
