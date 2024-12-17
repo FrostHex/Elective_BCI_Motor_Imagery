@@ -22,6 +22,9 @@ class CSPLDAClass:
                 for ch in range(X_train.shape[1]): # 对每个通道进行E滤波
                     filteeg[trail, ch, :] = signal.filtfilt(b, a, X_train[trail, ch, :])
             # 使用CSP变换滤波后的数据
+            print("filteeg:", filteeg)
+            print("filteeg.shape:", filteeg.shape)
+            print("type:", type(filteeg))
             XFB_train = FBCSP[i].transform(filteeg)
             # 将变换后的数据拼接到结果数组中
             x = np.concatenate((x, XFB_train), axis=1)
@@ -41,14 +44,6 @@ class CSPLDAClass:
         lda_23 = joblib.load(model_path + 'lda_23.pkl')
         return [csp_12, lda_12, csp_13, lda_13, csp_23, lda_23]
 
-    def getCSP(self, personID):
-        mod_max_path = rootdir + '/database'
-        mod_max_list = os.listdir(mod_max_path)
-        # mod_max_list.sort(key=lambda x: int(x[6:7]))
-        modPath = os.path.join(mod_max_path, mod_max_list[personID-1])
-        mod = joblib.load(modPath)
-        return mod
-
     def recognize(self, data, personID):
         #data = self.band_Filter(data, personID)  # 每个人选择不同的带通滤波器
         mod = self.getmodel(personID)
@@ -58,6 +53,9 @@ class CSPLDAClass:
         lda_13 = mod[3]
         csp_23 = mod[4]
         lda_23 = mod[5]
+
+        # print("data:", data)
+        # print("data.shape:", data.shape)
 
         data_csp_12 = self.fbcsp_transform(np.expand_dims(data, 0), csp_12)
         data_csp_13 = self.fbcsp_transform(np.expand_dims(data, 0), csp_13)

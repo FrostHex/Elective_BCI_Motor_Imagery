@@ -11,8 +11,8 @@ from scipy.linalg import eig  # 添加必要的库
 # 定义常量
 ID_NUM = 5
 BLOCK_NUM = 25
-K = 6  # 投影方向W为64xK的矩阵
-# L = 64 # 通道数
+L = 59 # 脑电信号通道数
+K = 6  # 投影方向W为 LxK 的矩阵
 INTERPRET_TASK = {'1': 'left', '2': 'right', '3': 'feet'}
 
 
@@ -21,72 +21,81 @@ class Train():
     def __init__(self):
         self.root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../MI_data_training/'))
         
-        # 数据字典, key为受试者ID, value为一个字典, key为左手、右手、双脚 三类任务数据, 每个数据为一个64*0的矩阵
-        self.data = {id: {'left': np.zeros((64, 0)), 'right': np.zeros((64, 0)), 'feet': np.zeros((64, 0))} for id in range(1, 6)}
+        # 数据字典, key为受试者ID, value为一个字典, key为左手、右手、双脚 三类任务数据, 每个数据为一个列表，列表中的每个元素为一个LxN的矩阵
+        self.data = {id: {'left': [], 'right': [], 'feet': []} for id in range(1, 6)}
         # print("data:", self.data)
 
-        # 三类样本的协方差矩阵字典, key为受试者ID, value为一个字典, key为左手、右手、双脚三个数据, 每个数据为一个64*64的矩阵
-        self.cov_matrix_task_all = {id: {'left': np.zeros((64, 64)), 'right': np.zeros((64, 64)), 'feet': np.zeros((64, 64))} for id in range(1, 6)}
+        # 有效的组数, left+right+feet 算作一组, 多余的数据舍弃
+        self.valid_group_num = {id: 0 for id in range(1, 6)}
+
+        # 三类样本的协方差矩阵字典, key为受试者ID, value为一个字典, key为左手、右手、双脚三个数据, 每个数据为一个列表，列表中的每个元素为一个LxL的矩阵
+        self.cov_matrix_task_all = {id: {'left': [], 'right': [], 'feet': []} for id in range(1, 6)}
 
         # Σ_x1x1、Σ_x2x2, 两类样本的协方差矩阵, 1和2分别指代任务1和任务2
-        self.cov_matrix_task = {'1': np.zeros((64, 64)), '2': np.zeros((64, 64))}
+        self.cov_matrix_task = {'1': np.zeros((L, L)), '2': np.zeros((L, L))}
         
         # Σ_xx, 总体协方差矩阵
-        self.cov_matrix_all = np.zeros((64, 64))
+        self.cov_matrix_all = np.zeros((L, L))
 
         # Σ_xx^(1/2), 总体数据的白化矩阵
-        self.whitening_matrix_all = np.zeros((64, 64))
+        self.whitening_matrix_all = np.zeros((L, L))
 
         # Σ_x1'x1'、Σ_x2'x2', 两类样本白化后的协方差矩阵
-        self.cov_matrix_task_whitened = {'1': np.zeros((64, 64)), '2': np.zeros((64, 64))}
+        self.cov_matrix_task_whitened = {'1': np.zeros((L, L)), '2': np.zeros((L, L))}
 
         # W', 投影矩阵
-        self.W_prime = np.zeros((64, 64))
+        self.W_prime = np.zeros((L, L))
 
         # W, 最优空间滤波矩阵
-        self.W = np.zeros((64, 64))
-
-        # Y1', Y2', 样本经过CSP空域滤波器的投影
-        self.Y1_prime = self.Y2_prime = np.zeros((K, 0))
-
+        self.W = np.zeros((L, L))
 
 
 
     # @brief: 主函数
     def run(self):
         self.preprocess_data('r') # 从pkl文件读取预处理后的数据和三类样本的协方差矩阵
-        for id in range(1, ID_NUM + 1): # 几位受试者分别进行
+        for id in range(1, 6): # 几位受试者分别进行
             for tasks in ['12', '13', '23']: # 12、13、23三个CSP的训练分别进行
+                feature_1 = feature_2 = []
                 x1 = tasks[0]
                 x2 = tasks[1]
-                # 1.载入两类样本的协方差矩阵: Σ_x1x1、Σ_x2x2
-                self.cov_matrix_task['1'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x1]]
-                self.cov_matrix_task['2'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x2]]
-                # 2.计算总体的样本协方差矩阵: Σ_xx
-                self.cov_matrix_all = self.cov_matrix_task['1'] + self.cov_matrix_task['2']
-                # 3.计算总体数据的白化矩阵: Σ_xx^(1/2)
-                self.whitening_matrix_all = self.compute_whitening_matrix(self.cov_matrix_all)
-                print("whitening matrix for id:", id, " task:", tasks, ":\n", self.whitening_matrix_all)
-                # 4.计算两类样本白化后的协方差矩阵: Σ_x1'x1'、Σ_x2'x2'
-                self.cov_matrix_task_whitened['1'] = self.whitening_matrix_all @ self.cov_matrix_task['1'] @ self.whitening_matrix_all.T
-                self.cov_matrix_task_whitened['2'] = self.whitening_matrix_all @ self.cov_matrix_task['2'] @ self.whitening_matrix_all.T
-                # 5.计算广义特征值分解，获得投影矩阵 W'
-                eigvals, eigvecs = eig(self.cov_matrix_task_whitened['1'], self.cov_matrix_task_whitened['2'])
-                idx = np.argsort(eigvals)[::-1] # 将特征值和特征向量按特征值从大到小排序
-                eigvecs = eigvecs[:, idx]
-                self.W_prime = np.hstack((eigvecs[:, :K//2], eigvecs[:, -K//2:])).real # 提取前K/2列和后K/2列拼接
-                # print("W_prime for id:", id, " task:", tasks, ":\n", self.W_prime)
-                # print("W_prime shape:", self.W_prime.shape)
-                # 6.计算最优空间滤波矩阵W
-                self.W = self.whitening_matrix_all.T @ self.W_prime
-                # 7.采用所有训练样本通过共空间滤波矩阵W, 计算投影Y'
-                self.Y1_prime =  self.W.T @ self.data[id][INTERPRET_TASK[x1]] # 64*K @ K*N = 64*N
-                self.Y2_prime =  self.W.T @ self.data[id][INTERPRET_TASK[x2]]
-                # 8.计算两类样本Y', 每行的自相关系数，并训练分类器
-                
-                
-                
+                for block in range(0, self.valid_group_num[id]): # 从0到self.valid_group_num[id]-1
+                    # 1.载入两类样本的协方差矩阵: Σ_x1x1、Σ_x2x2
+                    # print("id:", id, "block:", block)
+                    self.cov_matrix_task['1'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x1]][block]
+                    self.cov_matrix_task['2'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x2]][block]
+                    # 2.计算总体的样本协方差矩阵: Σ_xx
+                    self.cov_matrix_all = self.cov_matrix_task['1'] + self.cov_matrix_task['2']
+                    # 3.计算总体数据的白化矩阵: Σ_xx^(1/2)
+                    self.whitening_matrix_all = self.compute_whitening_matrix(self.cov_matrix_all)
+                    # print("whitening matrix for id:", id, " task:", tasks, ":\n", self.whitening_matrix_all)
+                    # 4.计算两类样本白化后的协方差矩阵: Σ_x1'x1'、Σ_x2'x2'
+                    self.cov_matrix_task_whitened['1'] = self.whitening_matrix_all @ self.cov_matrix_task['1'] @ self.whitening_matrix_all.T
+                    self.cov_matrix_task_whitened['2'] = self.whitening_matrix_all @ self.cov_matrix_task['2'] @ self.whitening_matrix_all.T
+                    # 5.计算广义特征值分解，获得投影矩阵 W'
+                    eigvals, eigvecs = eig(self.cov_matrix_task_whitened['1'], self.cov_matrix_task_whitened['2'])
+                    idx = np.argsort(eigvals)[::-1] # 将特征值和特征向量按特征值从大到小排序
+                    eigvecs = eigvecs[:, idx]
+                    self.W_prime = np.hstack((eigvecs[:, :K//2], eigvecs[:, -K//2:])).real # 提取前K/2列和后K/2列拼接
+                    # 6.计算最优空间滤波矩阵W
+                    self.W = self.whitening_matrix_all.T @ self.W_prime # LxL @ LxK = LxK
+                    # 7.采用所有训练样本通过共空间滤波矩阵W, 计算投影Y'
+                    Y1_prime =  self.W.T @ self.data[id][INTERPRET_TASK[x1]][block] # KxL @ LxN = KxN
+                    Y2_prime =  self.W.T @ self.data[id][INTERPRET_TASK[x2]][block]
+                    # 8.计算两类样本Y', 每行的自相关系数
+                    feature_1.append(np.diag(np.cov(Y1_prime))) # 计算Y'的 KxK 相关矩阵, data已经去均值，协方差矩阵即为自相关矩阵
+                    feature_2.append(np.diag(np.cov(Y2_prime))) # 对角线元素作为特征, np.diag(np.cov(Y2_prime))长度为K
+                # 9.训练分类器
+                self.train_lda(id, tasks, feature_1, feature_2)
         return
+
+
+    def train_lda(self, id, task, feature_1, feature_2):
+        # print("id:", id, "task:", task)
+        print("id:", id, "task:", task, "feature_1:", feature_1, "feature_2:", feature_2)
+        # 训练LDA模型
+        lda = LDA()
+        # lda.fit(X, y)
 
 
     # @brief: 读取pkl文件内数据
@@ -135,31 +144,43 @@ class Train():
             for id in range(1, ID_NUM + 1):
                 for block in range(1, BLOCK_NUM + 1):
                     data = self.get_data(id=id, block=block)
-                    # data = data[:, ~np.isin(data[64, :], [0, 242, 243])] # 去除65号通道这几个元素所在的列
+                    # data = data[:, ~np.isin(data[L, :], [0, 242, 243])] # 去除65号通道这几个元素所在的列
                     # 将数据按照trigger分类
-                    self.data[id]['left'] = np.hstack((self.data[id]['left'], data[:64, data[64, :] == 201]))
-                    self.data[id]['right'] = np.hstack((self.data[id]['right'], data[:64, data[64, :] == 202]))
-                    self.data[id]['feet'] = np.hstack((self.data[id]['feet'], data[:64, data[64, :] == 203]))
+                    task_map = {201: 'left', 202: 'right', 203: 'feet'}
+                    for trigger, task in task_map.items():
+                        mask = data[64, :] == trigger
+                        if mask.any():
+                            self.data[id][task].append(data[:L, mask])
+                # print("id:", id, "left num:", len(self.data[id]['left']), "right num:", len(self.data[id]['right']), "feet num:", len(self.data[id]['feet']))
+                self.valid_group_num[id] = min(len(self.data[id]['left']), len(self.data[id]['right']), len(self.data[id]['feet']))
+                for task in ['left', 'right', 'feet']:
+                    self.data[id][task] = self.data[id][task][:self.valid_group_num[id]]
+                # print("id:", id, "left num:", len(self.data[id]['left']), "right num:", len(self.data[id]['right']), "feet num:", len(self.data[id]['feet']))
+            # print("valid group num:", self.valid_group_num)
             # 将数据转换为三类样本的协方差矩阵
             for id in range(1, ID_NUM + 1):
                 for task in ['left', 'right', 'feet']:
-                    if self.data[id][task].size > 0:
-                        # 保险起见, 手动去中心化, 不加这步直接调cov发现会算出负数的特征值
-                        self.data[id][task] -= np.mean(self.data[id][task], axis=1, keepdims=True)
-                        self.cov_matrix_task_all[id][task] = np.cov(self.data[id][task])
-                    else:
-                        self.cov_matrix_task_all[id][task] = np.zeros((64, 64))
+                    for data_block in self.data[id][task]:
+                        # print("size:", data_block.size)
+                        if data_block.size != 0:
+                            # 保险起见, 手动去中心化, 不加这步直接调cov发现会算出负数的特征值
+                            data_block -= np.mean(data_block, axis=1, keepdims=True)
+                            self.cov_matrix_task_all[id][task].append(np.cov(data_block))
             # print("cov_matrix_task_all:", self.cov_matrix_task_all)
             # 保存预处理后的数据和三类样本的协方差矩阵至pkl文件
             with open(os.path.join(os.path.dirname(__file__), 'data.pkl'), 'wb') as f:
                 joblib.dump(self.data, f)
             with open(os.path.join(os.path.dirname(__file__), 'cov_matrix_task_all.pkl'), 'wb') as f:
                 joblib.dump(self.cov_matrix_task_all, f)
+            with open(os.path.join(os.path.dirname(__file__), 'valid_group_num.pkl'), 'wb') as f:
+                joblib.dump(self.valid_group_num, f)
         elif operation == 'r': # 从pkl文件读取预处理后的数据和三类样本的协方差矩阵
             with open(os.path.join(os.path.dirname(__file__), 'data.pkl'), 'rb') as f:
                 self.data = joblib.load(f)
             with open(os.path.join(os.path.dirname(__file__), 'cov_matrix_task_all.pkl'), 'rb') as f:
                 self.cov_matrix_task_all = joblib.load(f)
+            with open(os.path.join(os.path.dirname(__file__), 'valid_group_num.pkl'), 'rb') as f:
+                self.valid_group_num = joblib.load(f)
 
 
 
