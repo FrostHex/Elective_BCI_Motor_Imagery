@@ -1,7 +1,7 @@
 import numpy as np
 import os
 import joblib
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from sklearn.svm import SVC  # 添加必要的库
 from scipy import signal
 
 
@@ -10,11 +10,11 @@ rootdir = os.path.dirname(os.path.abspath(__file__))
 class CSPLDAClass:
     def __init__(self):
         self.csp_12 = [None] * 6
-        self.lda_12 = [LDA()] * 6
+        self.svm_12 = [None] * 6
         self.csp_13 = [None] * 6
-        self.lda_13 = [LDA()] * 6
+        self.svm_13 = [None] * 6
         self.csp_23 = [None] * 6
-        self.lda_23 = [LDA()] * 6
+        self.svm_23 = [None] * 6
         self.getmodel()
 
     def fbcsp_transform(self, data, task, id):
@@ -44,11 +44,11 @@ class CSPLDAClass:
         for id in range(1,6): 
             model_path = rootdir + '/model/S' + str(id) + '/'
             self.csp_12[id-1] = joblib.load(model_path + 'csp_12.pkl')
-            self.lda_12[id-1] = joblib.load(model_path + 'lda_12.pkl')
+            self.svm_12[id-1] = joblib.load(model_path + 'svm_12.pkl')
             self.csp_13[id-1] = joblib.load(model_path + 'csp_13.pkl')
-            self.lda_13[id-1] = joblib.load(model_path + 'lda_13.pkl')
+            self.svm_13[id-1] = joblib.load(model_path + 'svm_13.pkl')
             self.csp_23[id-1] = joblib.load(model_path + 'csp_23.pkl')
-            self.lda_23[id-1] = joblib.load(model_path + 'lda_23.pkl')
+            self.svm_23[id-1] = joblib.load(model_path + 'svm_23.pkl')
 
 
     def recognize(self, data, personID):
@@ -59,9 +59,9 @@ class CSPLDAClass:
         data_csp_12 = self.fbcsp_transform(data,'12', personID)
         data_csp_13 = self.fbcsp_transform(data,'13', personID)
         data_csp_23 = self.fbcsp_transform(data,'23', personID)
-        pro12 = self.lda_12[personID -1].predict_proba(data_csp_12.reshape(1, -1))
-        pro13 = self.lda_13[personID -1].predict_proba(data_csp_13.reshape(1, -1))
-        pro23 = self.lda_23[personID -1].predict_proba(data_csp_12.reshape(1, -1))
+        pro12 = self.svm_12[personID -1].predict_proba(data_csp_12.reshape(1, -1))
+        pro13 = self.svm_13[personID -1].predict_proba(data_csp_13.reshape(1, -1))
+        pro23 = self.svm_23[personID -1].predict_proba(data_csp_23.reshape(1, -1))
         print("data_csp_12:", data_csp_12.reshape(1,-1))
         print("data_csp_13:", data_csp_13.reshape(1,-1))
         print("data_csp_23:", data_csp_23.reshape(1,-1))

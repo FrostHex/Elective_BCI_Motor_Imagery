@@ -3,6 +3,7 @@ import os
 import joblib
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from scipy.linalg import eig  # 添加必要的库
+from sklearn.svm import SVC  # 添加必要的库
 
 # Trigger 定义
 # 实验开始  实验结束  Block开始  Block结束  Trial开始  Trial结束  左手想象  右手想象  双脚想象  测试集特有(想象开始)
@@ -12,7 +13,7 @@ from scipy.linalg import eig  # 添加必要的库
 ID_NUM = 5
 BLOCK_NUM = 25
 L = 59 # 脑电信号通道数
-K = 6  # 投影方向W为 LxK 的矩阵
+K = 10  # 投影方向W为 LxK 的矩阵
 INTERPRET_TASK = {'1': 'left', '2': 'right', '3': 'feet'}
 
 
@@ -67,42 +68,43 @@ class Train():
                     self.cov_matrix_task['2'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x2]][block]
                     # 2.计算总体的样本协方差矩阵: Σ_xx
                     self.cov_matrix_all = self.cov_matrix_task['1'] + self.cov_matrix_task['2']
-                    # 3.计算总体数据的白化矩阵: Σ_xx^(1/2)
-                    self.whitening_matrix_all = self.compute_whitening_matrix(self.cov_matrix_all)
-                    # print("whitening matrix for id:", id, " task:", task, ":\n", self.whitening_matrix_all)
-                    # 4.计算两类样本白化后的协方差矩阵: Σ_x1'x1'、Σ_x2'x2'
-                    self.cov_matrix_task_whitened['1'] = self.whitening_matrix_all @ self.cov_matrix_task['1'] @ self.whitening_matrix_all.T
-                    self.cov_matrix_task_whitened['2'] = self.whitening_matrix_all @ self.cov_matrix_task['2'] @ self.whitening_matrix_all.T
-                    # 5.计算广义特征值分解，获得投影矩阵 W'
-                    eigvals, eigvecs = eig(self.cov_matrix_task_whitened['1'], self.cov_matrix_task_whitened['2'])
-                    idx = np.argsort(eigvals)[::-1] # 将特征值和特征向量按特征值从大到小排序
-                    eigvecs = eigvecs[:, idx]
-                    self.W_prime = np.hstack((eigvecs[:, :K//2], eigvecs[:, -K//2:])).real # 提取前K/2列和后K/2列拼接
-                    # 6.计算最优空间滤波矩阵W
-                    self.W = self.whitening_matrix_all.T @ self.W_prime # LxL @ LxK = LxK
+                    # 3.计算白化矩阵
+                    eigvals, eigvecs = np.linalg.eigh(self.cov_matrix_all)
+                    eigvals_inv_sqrt = np.diag(1.0 / np.sqrt(eigvals))
+                    whitening_matrix = eigvecs @ eigvals_inv_sqrt @ eigvecs.T
+                    # 4. 白化后的协方差矩阵
+                    S1 = whitening_matrix @ self.cov_matrix_task['1'] @ whitening_matrix.T
+                    # 5. 对白化后的协方差矩阵进行特征值分解
+                    eigvals, U = np.linalg.eigh(S1)
+                    # 6. 按特征值从大到小排序
+                    idx = np.argsort(eigvals)[::-1]
+                    U = U[:, idx]
+                    # 7. 计算空间滤波器W
+                    self.W = whitening_matrix.T @ U
+                    # 8. 选择前K/2和后K/2个滤波器
+                    self.W = np.hstack((self.W[:, :K//2], self.W[:, -K//2:]))
                     with open(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + '/csp_' + task + '.pkl'), 'wb') as f:
                         joblib.dump(self.W.T, f)
-                    # 7.采用所有训练样本通过共空间滤波矩阵W, 计算投影Y'
-                    Y1_prime =  self.W.T @ self.data[id][INTERPRET_TASK[x1]][block] # KxL @ LxN = KxN
-                    Y2_prime =  self.W.T @ self.data[id][INTERPRET_TASK[x2]][block]
-                    # 8.计算两类样本Y', 每行的自相关系数
-                    feature_1.append(np.diag(np.cov(Y1_prime))) # 计算Y'的 KxK 相关矩阵, data已经去均值，协方差矩阵即为自相关矩阵
-                    feature_2.append(np.diag(np.cov(Y2_prime))) # 对角线元素作为特征, np.diag(np.cov(Y2_prime))长度为K
+                    # 10. 提取特征
+                    Y1_prime = self.W.T @ self.data[id][INTERPRET_TASK[x1]][block]
+                    Y2_prime = self.W.T @ self.data[id][INTERPRET_TASK[x2]][block]
+                    # 11. 计算对数方差作为特征
+                    feature_1.append(np.log(np.var(Y1_prime, axis=1)))
+                    feature_2.append(np.log(np.var(Y2_prime, axis=1)))
                     # print("feature 1:", len(feature_1), "feature 2:", len(feature_2))
                 # 9.训练分类器
-                self.train_lda(id, task, feature_1, feature_2)
+                self.train_svm(id, task, feature_1, feature_2)
         return
 
 
-    def train_lda(self, id, task, feature_1, feature_2):
-        lda = LDA() # 训练LDA模型
+    def train_svm(self, id, task, feature_1, feature_2):
+        svm = SVC(probability=True)  # 设置 probability=True
         X = np.vstack((feature_1, feature_2))
         y = np.hstack((np.zeros(len(feature_1)), np.ones(len(feature_2))))
-        lda.fit(X, y)
-        print("lda score:", lda.score(X, y))
+        svm.fit(X, y)
         # 保存训练模型
-        with open(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + '/lda_' + task + '.pkl'), 'wb') as f:
-            joblib.dump(lda, f)
+        with open(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + '/svm_' + task + '.pkl'), 'wb') as f:
+            joblib.dump(svm, f)
 
     # @brief: 读取pkl文件内数据
     # @param: id: 从1到5,代表S1到S5, 5位受试者
