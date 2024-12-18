@@ -38,7 +38,7 @@ if __name__ == '__main__':
     # # 获取评分
     scoreModel = algorithm_sys_mng.get_score()
     # # 打印结果
-    print(scoreModel.score)
+    print("score:   ", scoreModel.score)
     # 清除算法
     algorithm_sys_mng.clear_algorithm()
     # 清除数据
