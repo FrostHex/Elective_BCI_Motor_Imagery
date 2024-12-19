@@ -104,8 +104,8 @@ class TaskManagerMI(TaskManagerInterface):
     # 获取得分
     def get_score(self):
         # 调用函数
-        score_model = self.__cal_score()
-        return score_model
+        score_model, accuracy = self.__cal_score()
+        return score_model, accuracy
 
     # 清除数据
     def clear_data(self):
@@ -393,7 +393,7 @@ class TaskManagerMI(TaskManagerInterface):
         score_model = ScoreModel()
         score_model.score = sum(block_itr) / len(block_itr)
         print("accuracy:", np.average(accuracy_for_one_block_set))
-        return score_model
+        return score_model, np.average(accuracy_for_one_block_set)
 
     # 计算ITR
     def __cal_itr(self, N, P, T, margin=0.5):

@@ -7,7 +7,7 @@ import numpy as np
 class AlgorithmImplementMI(AlgorithmInterface):
     PARADIGMNAME = 'MI'
 
-    def __init__(self):
+    def __init__(self,window_size, step_size):
         super().__init__()
         samp_rate = 250
         self.samp_rate = samp_rate
@@ -16,7 +16,7 @@ class AlgorithmImplementMI(AlgorithmInterface):
         self.trial_end_trig = 241
         cal_time = 2
         self.cal_len = cal_time * samp_rate
-        self.method = CSPLDAClass()
+        self.method = CSPLDAClass(window_size, step_size)
         self.filterB, self.filterA = self.__get_pre_filter(samp_rate)
         self.cache_data = np.zeros((64, self.cal_len))
         self.cache_pos = 0
