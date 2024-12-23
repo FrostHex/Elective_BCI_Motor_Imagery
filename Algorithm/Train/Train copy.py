@@ -4,6 +4,7 @@ import joblib
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from scipy.signal import butter, filtfilt
 from scipy.linalg import eig  # 添加必要的库
+import matplotlib.pyplot as plt
 
 # Trigger 定义
 # 实验开始  实验结束  Block开始  Block结束  Trial开始  Trial结束  左手想象  右手想象  双脚想象  测试集特有(想象开始)
@@ -15,12 +16,6 @@ BLOCK_NUM = 25
 L = 59  # 脑电信号通道数
 K = 6  # 投影方向W为 LxK 的矩阵
 INTERPRET_TASK = {'1': 'left', '2': 'right', '3': 'feet'}
-
-# 定义多个频率带
-frequency_bands = [(8, 12), (12, 30), (30, 50)]
-
-# 定义采样频率
-fs = 250  # 根据实际情况设置采样频率
 
 
 class Train():
@@ -63,80 +58,108 @@ class Train():
     # @brief: 主函数
     def run(self):
         self.preprocess_data('w')  # 从pkl文件读取预处理后的数据和三类样本的协方差矩阵
-        for id in range(1, 6):
-            # 初始化每个任务的特征列表
-            features_task = {'12': {'feature_1': [], 'feature_2': []},
-                             '13': {'feature_1': [], 'feature_2': []},
-                             '23': {'feature_1': [], 'feature_2': []}}
-            
-            for band_idx, band in enumerate(frequency_bands):
-                # 进行带通滤波
-                filtered_data = {
-                    task: [self.bandpass_filter(trial, band[0], band[1]) for trial in self.data[id][task]]
-                    for task in ['left', 'right', 'feet']
-                }
-                for task in ['12', '13', '23']:
-                    x1 = task[0]
-                    x2 = task[1]
-                    # 1.载入两类样本的协方差矩阵: Σ_x1x1、Σ_x2x2
-                    # print("id:", id, "block:", block)
-                    self.cov_matrix_task['1'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x1]]
-                    self.cov_matrix_task['2'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x2]]
-                    # 2.计算总体的样本协方差矩阵: Σ_xx
-                    self.cov_matrix_all = self.cov_matrix_task['1'] + self.cov_matrix_task['2']
-                    # 3.计算总体数据的白化矩阵: Σ_xx^(1/2)
-                    self.whitening_matrix_all = self.compute_whitening_matrix(self.cov_matrix_all)
-                    # print("whitening matrix for id:", id, " task:", task, ":\n", self.whitening_matrix_all)
-                    # 4.计算两类样本白化后的协方差矩阵: Σ_x1'x1'、Σ_x2'x2'
-                    self.cov_matrix_task_whitened['1'] = self.whitening_matrix_all @ self.cov_matrix_task[
-                        '1'] @ self.whitening_matrix_all.T
-                    self.cov_matrix_task_whitened['2'] = self.whitening_matrix_all @ self.cov_matrix_task[
-                        '2'] @ self.whitening_matrix_all.T
-                    # 5.计算广义特征值分解，获得投影矩阵 W'
-                    eigvals, eigvecs = eig(self.cov_matrix_task_whitened['1'], self.cov_matrix_task_whitened['2'])
-                    idx = np.argsort(eigvals)[::-1]  # 将特征值和特征向量按特征值从大到小排序
-                    eigvecs = eigvecs[:, idx]
-                    self.W_prime = np.hstack((eigvecs[:, :K // 2], eigvecs[:, -K // 2:])).real  # 提取前K/2列和后K/2列拼接
-                    # 6.计算最优空间滤波矩阵W
-                    self.W = self.whitening_matrix_all.T @ self.W_prime  # LxL @ LxK = LxK
-                    # 修改保存模型的文件名，包含频率带索引
-                    with open(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + f'/csp_{task}_band{band_idx}.pkl'),
-                              'wb') as f:
-                        joblib.dump(self.W.T, f)
+        for id in range(1, 6):  # 几位受试者分别进行
+            for task in ['12', '13', '23']:  # 12、13、23三个CSP的训练分别进行
+                feature_1 = []
+                feature_2 = []
+                x1 = task[0]
+                x2 = task[1]
+                # 1.载入两类样本的协方差矩阵: Σ_x1x1、Σ_x2x2
+                # print("id:", id, "block:", block)
+                self.cov_matrix_task['1'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x1]]
+                self.cov_matrix_task['2'] = self.cov_matrix_task_all[id][INTERPRET_TASK[x2]]
+                # 2.计算总体的样本协方差矩阵: Σ_xx
+                self.cov_matrix_all = self.cov_matrix_task['1'] + self.cov_matrix_task['2']
+                # 3.计算总体数据的白化矩阵: Σ_xx^(1/2)
+                self.whitening_matrix_all = self.compute_whitening_matrix(self.cov_matrix_all)
+                # print("whitening matrix for id:", id, " task:", task, ":\n", self.whitening_matrix_all)
+                # 4.计算两类样本白化后的协方差矩阵: Σ_x1'x1'、Σ_x2'x2'
+                self.cov_matrix_task_whitened['1'] = self.whitening_matrix_all @ self.cov_matrix_task[
+                    '1'] @ self.whitening_matrix_all.T
+                self.cov_matrix_task_whitened['2'] = self.whitening_matrix_all @ self.cov_matrix_task[
+                    '2'] @ self.whitening_matrix_all.T
+                # 5.计算广义特征值分解，获得投影矩阵 W'
+                eigvals, eigvecs = eig(self.cov_matrix_task_whitened['1'], self.cov_matrix_task_whitened['2'])
+                idx = np.argsort(eigvals)[::-1]  # 将特征值和特征向量按特征值从大到小排序
+                eigvecs = eigvecs[:, idx]
+                self.W_prime = np.hstack((eigvecs[:, :K // 2], eigvecs[:, -K // 2:])).real  # 提取前K/2列和后K/2列拼接
+                # 6.计算最优空间滤波矩阵W
+                self.W = self.whitening_matrix_all.T @ self.W_prime  # LxL @ LxK = LxK
+                with open(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + '/csp_' + task + '.pkl'),
+                          'wb') as f:
+                    joblib.dump(self.W.T, f)
+                for block in range(0, self.valid_group_num[id]):  # 从0到self.valid_group_num[id]-1
+                    # 7.采用所有训练样本通过共空间滤波矩阵W, 计算投影Y'
+                    Y1_prime = self.W.T @ self.data[id][INTERPRET_TASK[x1]][block]  # KxL @ LxN = KxN
+                    Y2_prime = self.W.T @ self.data[id][INTERPRET_TASK[x2]][block]
+                    # 7.1.滤波
+                    # 8.计算两类样本Y'的FFT
+                    Y1_prime_fft = np.fft.fft(Y1_prime, axis=1)[:K//2]
+                    Y2_prime_fft = np.fft.fft(Y2_prime, axis=1)[:K//2]
+
+                    # 取0～5Hz的数值
+                    Y1_prime_fft = np.hstack((Y1_prime_fft[:, 8:15], Y1_prime_fft[:, 18:24]))
+                    Y2_prime_fft = np.hstack((Y2_prime_fft[:, 8:15], Y2_prime_fft[:, 18:24]))
                     
-                    for block in range(0, self.valid_group_num[id]):  # 从0到self.valid_group_num[id]-1
-                        # 7.采用所有训练样本通过共空间滤波矩阵W, 计算投影Y'
-                        Y1_prime = self.W.T @ filtered_data[INTERPRET_TASK[x1]][block]  # KxL @ LxN = KxN
-                        Y2_prime = self.W.T @ filtered_data[INTERPRET_TASK[x2]][block]
-                        # 8.计算两类样本Y', 每行的自相关系数
-                        features_task[task]['feature_1'].append(np.diag(np.cov(Y1_prime)))  # 长度为K
-                        features_task[task]['feature_2'].append(np.diag(np.cov(Y2_prime)))  # 长度为K
-                        # print("feature 1:", len(features_task[task]['feature_1']), "feature 2:", len(features_task[task]['feature_2']))
-            
-            # 训练LDA模型使用所有频率带的特征
-            for task in ['12', '13', '23']:
-                feature_1 = np.hstack(features_task[task]['feature_1'])  # 6 * num_bands = 18
-                feature_2 = np.hstack(features_task[task]['feature_2'])  # 6 * num_bands = 18
-                # 重新划分为二维数组，每个band的特征相邻
-                feature_1 = feature_1.reshape(-1, K * len(frequency_bands))
-                feature_2 = feature_2.reshape(-1, K * len(frequency_bands))
+                    # if id == 1 and task == '12' and block == 0:
+                    #     # Plot Y1_prime_fft
+                    #     plt.figure(figsize=(12, 6))
+                    #     plt.subplot(2, 1, 1)
+                    #     plt.plot(np.abs(Y1_prime_fft).T)
+                    #     plt.title(f'Y1_prime_fft for id {id}, task {task}, block {block}')
+                    #     plt.xlim(0, 40)
+                    #     plt.xlabel('Frequency')
+                    #     plt.ylabel('Amplitude')
+
+                    #     # Plot Y2_prime_fft
+                    #     plt.subplot(2, 1, 2)
+                    #     plt.plot(np.abs(Y2_prime_fft).T)
+                    #     plt.title(f'Y2_prime_fft for id {id}, task {task}, block {block}')
+                    #     plt.xlim(0, 40)
+                    #     plt.xlabel('Frequency')
+                    #     plt.ylabel('Amplitude')
+
+                    #     plt.tight_layout()
+                    #     plt.show()
+
+                    # 计算自相关系数
+                    feature_1.append(np.abs(Y1_prime_fft))
+                    feature_2.append(np.abs(Y2_prime_fft))
+                    # print("feature 1:", len(feature_1), "feature 2:", len(feature_2))
                 # 9.训练分类器
                 self.train_lda(id, task, feature_1, feature_2)
-
+                # 10.测试分类器
+                self.test_lda(id, task)
         print("mean scores:", np.mean(self.scores))
         return
 
     def train_lda(self, id, task, feature_1, feature_2):
         lda = LDA()  # 训练LDA模型
-        X = np.vstack((feature_1, feature_2))
+        X = np.vstack((feature_1, feature_2)).reshape(len(feature_1) + len(feature_2), -1)
         y = np.hstack((np.zeros(len(feature_1)), np.ones(len(feature_2))))
         lda.fit(X, y)
         # print("lda score:", lda.score(X, y))
         # 保存训练模型
         with open(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + '/lda_' + task + '.pkl'), 'wb') as f:
             joblib.dump(lda, f)
-        self.scores.append(lda.score(X, y))
 
+    def test_lda(self, id, task):
+        lda = joblib.load(os.path.join(os.path.dirname(__file__), '../model/S' + str(id) + '/lda_' + task + '.pkl'))
+        for block in range(self.valid_group_num[id] - 5, self.valid_group_num[id]):
+            Y1_prime = self.W.T @ self.data[id][INTERPRET_TASK[task[0]]][block]
+            Y2_prime = self.W.T @ self.data[id][INTERPRET_TASK[task[1]]][block]
+
+            Y1_prime_fft = np.fft.fft(Y1_prime, axis=1)[:K//2]
+            Y2_prime_fft = np.fft.fft(Y2_prime, axis=1)[:K//2]
+
+            # 取0～5Hz的数值
+            Y1_prime_fft = np.hstack((Y1_prime_fft[:, 8:15], Y1_prime_fft[:, 18:24]))
+            Y2_prime_fft = np.hstack((Y2_prime_fft[:, 8:15], Y2_prime_fft[:, 18:24]))
+            feature_1 = np.abs(Y1_prime_fft).reshape(1, -1)
+            feature_2 = np.abs(Y2_prime_fft).reshape(1, -1)
+            X = np.vstack((feature_1, feature_2)).reshape(2, -1)
+            y = np.hstack((np.zeros(1), np.ones(1)))
+            self.scores.append(lda.score(X, y))
 
     # @brief: 读取pkl文件内数据
     # @param: id: 从1到5,代表S1到S5, 5位受试者
@@ -237,12 +260,6 @@ class Train():
                 self.cov_matrix_task_all = joblib.load(f)
             with open(os.path.join(os.path.dirname(__file__), 'valid_group_num.pkl'), 'rb') as f:
                 self.valid_group_num = joblib.load(f)
-
-    # 添加带通滤波函数
-    def bandpass_filter(self, data, low, high):
-        Wn = [low / (fs / 2), high / (fs / 2)]  # 规范化频率
-        b, a = butter(N=4, Wn=Wn, btype='band')
-        return filtfilt(b, a, data)
 
 
 if __name__ == '__main__':
