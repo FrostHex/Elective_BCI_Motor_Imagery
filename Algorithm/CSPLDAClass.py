@@ -8,7 +8,7 @@ from scipy.signal import butter, filtfilt
 rootdir = os.path.dirname(os.path.abspath(__file__))
 
 # 定义多个频率带
-frequency_bands = [(8, 12), (12, 30), (30, 50)]
+frequency_bands = [(1, 8), (8, 16), (16, 24), (24, 32), (32, 40), (40, 48)]
 
 # 仅供测试所用
 class CSPLDAClass:
@@ -21,8 +21,8 @@ class CSPLDAClass:
         self.csp_23 = [[None] * len(frequency_bands) for _ in range(6)]
         self.lda_23 = [LDA() for _ in range(6)]
         self.getmodel()
-        # self.window_size = 500
-        # self.step_size = 500
+        self.window_size = 50
+        self.step_size = 215
         # self.window_size = window_size
         # self.step_size = step_size
 
@@ -55,25 +55,37 @@ class CSPLDAClass:
                 self.csp_23[id - 1][band_idx] = joblib.load(model_path + f'csp_23_band{band_idx}.pkl')
                 self.lda_23[id - 1] = joblib.load(model_path + f'lda_23.pkl')
 
+    def moving_window(self, data):
+        # 实现移动窗口算法
+        windows = []
+        for start in range(0, data.shape[1] - self.window_size + 1, self.step_size):
+            window = data[:, start:start + self.window_size]
+            windows.append(window)
+        return windows
+
     def recognize(self, data, personID):  # id为1-5
-        
-        data -= np.mean(data, axis=1, keepdims=True)
-        
-        data_csp_12 = self.fbcsp_transform(data, '12', personID).reshape(1, -1)
-        data_csp_13 = self.fbcsp_transform(data, '13', personID).reshape(1, -1)
-        data_csp_23 = self.fbcsp_transform(data, '23', personID).reshape(1, -1)
-        
-        # 不再合并所有频率带的特征，而是分别传递给各自的 LDA 模型
-        pro12 = self.lda_12[personID - 1].predict_proba(data_csp_12)
-        pro13 = self.lda_13[personID - 1].predict_proba(data_csp_13)
-        pro23 = self.lda_23[personID - 1].predict_proba(data_csp_23)
-        
-        # 组合各个 LDA 模型的概率以推断最终结果
-        pro1 = pro12[0, 0] + pro13[0, 0]  # P(task1) 的累积概率
-        pro2 = pro12[0, 1] + pro23[0, 0]  # P(task2) 的累积概率
-        pro3 = pro13[0, 1] + pro23[0, 1]  # P(task3) 的累积概率
-        pro = [pro1, pro2, pro3]
-        result = pro.index(max(pro)) + 201
-        return result
+        # 使用移动窗口处理数据
+        windows = self.moving_window(data)
+        results = []
+        for window in windows:
+            window -= np.mean(window, axis=1, keepdims=True)
+            data_csp_12 = self.fbcsp_transform(window, '12', personID).reshape(1, -1)
+            data_csp_13 = self.fbcsp_transform(window, '13', personID).reshape(1, -1)
+            data_csp_23 = self.fbcsp_transform(window, '23', personID).reshape(1, -1)
+            
+            # 不再合并所有频率带的特征，而是分别传递给各自的 LDA 模型
+            pro12 = self.lda_12[personID - 1].predict_proba(data_csp_12)
+            pro13 = self.lda_13[personID - 1].predict_proba(data_csp_13)
+            pro23 = self.lda_23[personID - 1].predict_proba(data_csp_23)
+            
+            # 组合各个 LDA 模型的概率以推断最终结果
+            pro1 = pro12[0, 0] + pro13[0, 0]  # P(task1) 的累积概率
+            pro2 = pro12[0, 1] + pro23[0, 0]  # P(task2) 的累积概率
+            pro3 = pro13[0, 1] + pro23[0, 1]  # P(task3) 的累积概率
+            pro = [pro1, pro2, pro3]
+            result = pro.index(max(pro)) + 201
+            results.append(result)
+        # 根据需要返回结果，例如返回多数投票结果
+        return max(set(results), key=results.count)
 
 
